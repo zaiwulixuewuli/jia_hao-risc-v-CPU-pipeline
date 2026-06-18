@@ -19,7 +19,8 @@ module hazard_handler (
     output wire        stall_id_ex,
     output wire        flush_if1_if2,
     output wire        flush_if2_id,
-    output wire        flush_id_ex
+    output wire        flush_id_ex,
+    output wire        stall_ex_mem0
 );
 
     wire ex_load  = ex_mem_read && (ex_rd != 5'b0) &&
@@ -41,7 +42,7 @@ module hazard_handler (
     assign stall_if2_id  = stall_active;
     assign stalldd       = stall_active;
     assign stall_id_ex   = stall_active;
-
+    assign stall_ex_mem0 = stall_active;
     wire branch_flush = branch_taken || ex_jal || ex_jalr;
     assign flush_if1_if2 = 1'b0;
     assign flush_if2_id  = branch_flush;

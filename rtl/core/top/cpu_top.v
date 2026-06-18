@@ -29,6 +29,25 @@ module cpu_top(
     wire        alu_zero;
 
     // EX/MEM -> MEM stage signals
+
+    wire        mem0_reg_write;
+    wire        mem0_mem_to_reg;
+    wire        mem0_mem_read;
+    wire        mem0_mem_write;
+    wire [2:0]  mem0_mem_type;
+    wire        mem0_branch;
+    wire [2:0]  mem0_br_type;
+    wire [31:0] mem0_pc;
+    wire [31:0] mem0_alu_result;
+    wire [31:0] mem0_rdata2;
+    wire [4:0]  mem0_rd;
+    wire        mem0_jal;
+    wire        mem0_jalr;
+    wire        mem0_rd_from_pc;
+    wire        mem0_lui_sel;
+    wire        mem0_auipc_sel;
+    wire [31:0] mem0_imm;
+
     wire        mem_reg_write;
     wire        mem_mem_to_reg;
     wire        mem_mem_read;
@@ -77,6 +96,7 @@ module cpu_top(
     wire stall_if1_if2;
     wire stall_if2_id;
     wire stall_id_ex;            // 新增：ID/EX 停顿信号
+    wire stall_ex_mem0;
     wire flush_if1_if2;
     wire flush_if2_id;
     wire flush_id_ex;
@@ -260,22 +280,36 @@ module cpu_top(
     wire [31:0] ex_rdata1_fwd;
     wire [31:0] ex_rdata2_fwd;
 
-    forward_passing u_forward (
-        .ex_rdata1_in(ex_rdata1),
-        .ex_rdata2_in(ex_rdata2),
-        .ex_rs1(ex_rs1),
-        .ex_rs2(ex_rs2),
-        .mem_reg_write(mem_reg_write),
-        .mem_rd(mem_rd),
-        .mem_wb_data(mem_alu_result),
-        .mem_mem_read(mem_mem_read),
-        .mem_read_data(mem_read_data),
-        .wb_reg_write(wb_reg_write),
-        .wb_rd(wb_rd),
-        .wb_wb_data(wb_mem_to_reg ? wb_mem_read_data : wb_alu_result),
-        .ex_rdata1_out(ex_rdata1_fwd),
-        .ex_rdata2_out(ex_rdata2_fwd)
-    );
+forward_passing u_forward (
+    // 来自 EX 阶段
+    .ex_rdata1_in      (ex_rdata1),
+    .ex_rdata2_in      (ex_rdata2),
+    .ex_rs1            (ex_rs1),
+    .ex_rs2            (ex_rs2),
+
+    // MEM0 阶段（离 EX 最近的内存级）
+    .mem0_reg_write    (mem0_reg_write),
+    .mem0_rd           (mem0_rd),
+    .mem0_wb_data      (mem0_alu_result),     // ALU 结果（对非 load 指令）
+    .mem0_mem_read     (mem0_mem_read),
+    .mem0_read_data    (mem_read_data),        // 来自 mem_io 的读数据（即 load 数据）
+
+    // MEM 阶段（较远的内存级，若只有一个内存级可视为无效）
+    .mem_reg_write     (mem_reg_write),
+    .mem_rd            (mem_rd),
+    .mem_wb_data       (mem_alu_result),       // 若 mem 阶段有 ALU 结果
+    .mem_mem_read      (mem_mem_read),         // 若 mem 阶段也有 load，则连接对应信号
+    .mem_read_data     (mem_read_data),        // 若需要，可连接同一数据或另行提供
+
+    // WB 阶段
+    .wb_reg_write      (wb_reg_write),
+    .wb_rd             (wb_rd),
+    .wb_wb_data        (reg_write_data),       // 写回阶段最终的写回数据
+
+    // 转发输出
+    .ex_rdata1_out     (ex_rdata1_fwd),
+    .ex_rdata2_out     (ex_rdata2_fwd)
+);
     assign alu_operand_a = (ex_auipc_sel == 1'b1) ? ex_pc: ex_rdata1_fwd;//选择数据，如果是1那就是auipc指令。嗯。
     assign alu_operand_b = (ex_alu_src == 1'b1) ? ex_imm : ex_rdata2_fwd;//选择数据，如果是1那就是立即数
 
@@ -292,9 +326,10 @@ module cpu_top(
     // =========================================================================
     // 5. 内存阶段 (Memory Access)
     // =========================================================================
-    ex_mem_reg u_ex_mem_reg (
+    ex_mem0_reg  u_ex_mem0_reg(
         .clk(clk),
         .rst(rst),
+        .stall_ex_mem0(stall_ex_mem0),
         .ex_reg_write(ex_reg_write),
         .ex_mem_to_reg(ex_mem_to_reg),
         .ex_mem_read(ex_mem_read),
@@ -312,6 +347,46 @@ module cpu_top(
         .ex_lui_sel(ex_lui_sel),
         .ex_auipc_sel(ex_auipc_sel),
         .ex_imm(ex_imm),
+
+        .mem0_reg_write(mem0_reg_write),
+        .mem0_mem_to_reg(mem0_mem_to_reg),
+        .mem0_mem_read(mem0_mem_read),
+        .mem0_mem_write(mem0_mem_write),
+        .mem0_mem_type(mem0_mem_type),
+        .mem0_branch(mem0_branch),
+        .mem0_br_type(mem0_br_type),
+        .mem0_pc(mem0_pc),
+        .mem0_alu_result(mem0_alu_result),
+        .mem0_rdata2(mem0_rdata2),
+        .mem0_rd(mem0_rd),
+        .mem0_jal(mem0_jal),
+        .mem0_jalr(mem0_jalr),
+        .mem0_rd_from_pc(mem0_rd_from_pc),
+        .mem0_lui_sel(mem0_lui_sel),
+        .mem0_auipc_sel(mem0_auipc_sel),
+        .mem0_imm(mem0_imm)
+    );
+    
+    mem0_mem_reg u_mem0_mem_reg (
+        .clk(clk),
+        .rst(rst),
+        .mem0_reg_write(mem0_reg_write),
+        .mem0_mem_to_reg(mem0_mem_to_reg),
+        .mem0_mem_read(mem0_mem_read),
+        .mem0_mem_write(mem0_mem_write),
+        .mem0_mem_type(mem0_mem_type),
+        .mem0_branch(mem0_branch),
+        .mem0_br_type(mem0_br_type),
+        .mem0_pc(mem0_pc),
+        .mem0_alu_result(mem0_alu_result),
+        .mem0_rdata2(mem0_rdata2),
+        .mem0_rd(mem0_rd),
+        .mem0_jal(mem0_jal),
+        .mem0_jalr(mem0_jalr),
+        .mem0_rd_from_pc(mem0_rd_from_pc),
+        .mem0_lui_sel(mem0_lui_sel),
+        .mem0_auipc_sel(mem0_auipc_sel),
+        .mem0_imm(mem0_imm),
         .mem_reg_write(mem_reg_write),
         .mem_mem_to_reg(mem_mem_to_reg),
         .mem_mem_read(mem_mem_read),
@@ -333,10 +408,10 @@ module cpu_top(
 
     mem_io u_mem_io (
         .clk(clk),
-        .mem_we(mem_mem_write),
-        .mem_type(mem_mem_type),
-        .addr(mem_alu_result),
-        .write_data(mem_rdata2),
+        .mem_we(mem0_mem_write),
+        .mem_type(mem0_mem_type),
+        .addr(mem0_alu_result),
+        .write_data(mem0_rdata2),
         .read_data(mem_read_data)
     );
 
@@ -422,6 +497,7 @@ module cpu_top(
         .stall_if2_id(stall_if2_id),
         .stalldd(stalldd),
         .stall_id_ex(stall_id_ex),   // 新增连接
+        .stall_ex_mem0(stall_ex_mem0),
         .flush_if1_if2(flush_if1_if2),
         .flush_if2_id(flush_if2_id),
         .flush_id_ex(flush_id_ex)
