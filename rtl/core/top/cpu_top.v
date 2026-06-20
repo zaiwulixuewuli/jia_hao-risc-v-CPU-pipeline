@@ -1,6 +1,17 @@
 module cpu_top(
     input wire clk,
-    input wire rst
+    input wire rst,
+    // ---- 指令总线 (Harvard I-Bus) ----
+    output wire [31:0] i_addr,      // 取指地址
+    input  wire [31:0] i_rdata,     // 指令数据
+    output wire        i_stall,     // 取指停顿信号（控制外部 ROM 输出保持）
+
+    // ---- 数据总线 (Harvard D-Bus) ----
+    output wire        d_we,        // 写使能
+    output wire [2:0]  d_type,      // 访问类型（字节/半字/字）
+    output wire [31:0] d_addr,      // 数据地址
+    output wire [31:0] d_wdata,     // 写数据
+    input  wire [31:0] d_rdata      // 读数据
 );
 
     // ----------------------------------------------------
@@ -120,6 +131,10 @@ module cpu_top(
         .pc_next(pc_next),
         .pc(pc)
     );
+
+    assign i_addr = pc;                // 输出取指地址
+    assign i_stall = stall_if1_if2;    // 停顿信号传递给外部 ROM
+    assign inst = i_rdata;             // 从外部总线读入指令
 
     rom u_rom (
         .addr(pc),
@@ -405,7 +420,14 @@ forward_passing u_forward (
         .mem_auipc_sel(mem_auipc_sel),
         .mem_imm(mem_imm)
     );
+    assign d_we    = mem0_mem_write;
+    assign d_type  = mem0_mem_type;
+    assign d_addr = (mem0_mem_read || mem0_mem_write) ? mem0_alu_result : 32'b0;
+    assign d_wdata = mem0_rdata2;
 
+    // 数据总线输入（读数据来自外部）
+    assign mem_read_data = d_rdata;
+    /*
     mem_io u_mem_io (
         .clk(clk),
         .mem_we(mem0_mem_write),
@@ -414,6 +436,7 @@ forward_passing u_forward (
         .write_data(mem0_rdata2),
         .read_data(mem_read_data)
     );
+    */
 
     mem_wb_reg u_mem_wb_reg (
         .clk(clk),
