@@ -23,30 +23,33 @@ module hazard_handler (
     output wire        stall_ex_mem0
 );
 
-    // 1. 冲突检测逻辑（保持你原本的判断条件不变）
+    // 1. 冲突检测逻辑（1 周期 Load-Use 判定）
     wire ex_load  = ex_mem_read && (ex_rd != 5'b0) &&
                     ((ex_rd == id_rs1) || (ex_rd == id_rs2));
     wire load_use = ex_load;
-    wire store_load_hazard = ex_mem_write && id_mem_read && (ex_addr == id_addr);
-    //wire need_stall = load_use || store_load_hazard;
-    wire  need_stall = load_use;
-    // 2. 重构 Stall 信号为纯组合逻辑，解决“迟到一拍”的问题
-    assign stall_pc      = need_stall;
-    assign stall_if1_if2 = need_stall;
-    assign stall_if2_id  = need_stall;
-    assign stalldd       = need_stall;
+    
+    // 2. Flush 控制逻辑（跳转信号）
+    wire branch_flush = branch_taken || ex_jal || ex_jalr;
 
-    // 3. 修正段间控制：Stall 发生时，ID/EX 和 EX/MEM0 不能被卡死
-    // 必须让 EX 阶段的指令流下去，并在 ID/EX 注入 NOP
+    // 3. 核心修正：当发生跳转清空时，必须强制解除 Stall 信号
+    // 否则会发生 Stall 锁死 PC、导致无法跳转的严重故障
+    wire actual_stall = load_use && !branch_flush;
+
+    // 4. Stall 信号赋值
+    assign stall_pc      = actual_stall;
+    assign stall_if1_if2 = actual_stall;
+    assign stall_if2_id  = actual_stall;
+    assign stalldd       = actual_stall;
+
+    // 保持后方阶段不被卡死，以便 Load 指令往后流动执行，腾出空间
     assign stall_id_ex   = 1'b0; 
     assign stall_ex_mem0 = 1'b0; 
 
-    // 4. Flush 控制逻辑
-    wire branch_flush = branch_taken || ex_jal || ex_jalr;
-    assign flush_if1_if2 = 1'b0;
+    // 5. Flush 信号赋值
+    assign flush_if1_if2 = branch_flush;
     assign flush_if2_id  = branch_flush;
     
-    // 关键修正：在需要 Stall 时，向 ID/EX 注入 Flush 信号以产生 NOP 空泡
-    assign flush_id_ex   = branch_flush || need_stall;
+    // 当 Stall 发生时，需要向 ID/EX 注入气泡（NOP）；或者发生跳转时直接清空
+    assign flush_id_ex   = branch_flush || actual_stall;
 
 endmodule

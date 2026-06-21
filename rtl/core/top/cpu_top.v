@@ -203,11 +203,26 @@ module cpu_top(
     );
 
     // ========== ID 级前向通路（用于地址计算） ==========
+// 1. 声明前推的数据信号（此处假设 mem0 阶段的 ALU 计算结果为 mem0_alu_result）
+    // 请根据您实际流水线中的信号名进行替换
+
     wire [31:0] forward_rs1;
-    wire mem_match_rs1_id = mem_reg_write && (mem_rd != 5'b0) && (mem_rd == rs1);
-    wire wb_match_rs1_id  = wb_reg_write  && (wb_rd  != 5'b0) && (wb_rd  == rs1) && !mem_match_rs1_id;
-    assign forward_rs1 = mem_match_rs1_id ? mem_alu_result :
-                         (wb_match_rs1_id ? (wb_mem_to_reg ? wb_mem_read_data : wb_alu_result) : reg_data1);
+
+    // 2. 修正语法空格问题，并保持匹配逻辑
+    wire mem0_match_rs1_id = mem0_reg_write && (mem0_rd != 5'b0) && (mem0_rd == rs1);
+    
+    // 如果最新的 mem0 已经匹配，则屏蔽后续阶段的匹配，防止多路选择冲突
+    wire mem_match_rs1_id  = mem_reg_write  && (mem_rd  != 5'b0) && (mem_rd  == rs1) && !mem0_match_rs1_id;
+    wire wb_match_rs1_id   = wb_reg_write   && (wb_rd   != 5'b0) && (wb_rd   == rs1) && !mem_match_rs1_id && !mem0_match_rs1_id;
+
+    // 3. 完善前推 MUX 逻辑
+    // 优先级从高到低：mem0_match (最新) -> mem_match -> wb_match -> 寄存器堆原始数据
+    assign forward_rs1 = mem0_match_rs1_id ? mem0_alu_result :
+                         mem_match_rs1_id  ? mem_alu_result :
+                         wb_match_rs1_id   ? (wb_mem_to_reg ? wb_mem_read_data : wb_alu_result) : 
+                                             reg_data1;
+
+    // 4. 地址计算
     assign id_addr = forward_rs1 + imm;
 
     // ------------------------------
